@@ -1,0 +1,146 @@
+---
+title: "Milestone Report - Johns Hopkins Data Science Capstone"
+author: "Stuart Ward"
+date: "December 28, 2015"
+output: html_document
+---
+
+### **Executive Summary**  
+This report contains the exploratory data analysis of three files: a text file containing twitter data, a text file containing blog data, and a text file containing news data. The contents of this report are presented in the following sections outlined below.    
+
+Report Sections:
+
+1. Acquiring and loading the data  
+2. Summary analysis of the data files  
+3. Graphical analysis of the data files  
+4. Next steps and goals  
+
+
+### **Section 1: Acquiring and loading the data**  
+The data was downloaded from: https://d396qusza40orc.cloudfront.net/dsscapstone/dataset/Coursera-SwiftKey.zip  
+The file was unzipped and produced three text files: "en_US.blogs.txt", "en_US.news.txt", "en_US.twitter.txt"
+
+The files were renamed to: "blogs.txt", "news.txt", and "twitter.txt" and copied into the working directory.
+
+The files were then loaded into R; TECHNICAL NOTE: the news file required opening via "rb" due to an error in reading the file directly.
+
+```{r eval=FALSE}
+twitterText <- readLines("twitter.txt", encoding="UTF-8")
+blogsText <- readLines("blogs.txt", encoding="UTF-8")
+con <- file("news.txt", open="rb")
+newsText <- readLines(con, encoding="UTF-8")
+close(con)
+rm(con)
+```
+  
+  
+### **Section 2: Summary analysis of the data files**  
+I reviewed a number of characteristics of each file (code shown below, but output has been suppressed) and then calculated the following for each file: the number of lines, the length of the longest line, and the total number of words.   
+
+```{r eval=FALSE}
+class(twitterText)
+head(twitterText)
+tail(twitterText)
+length(twitterText)
+max(nchar(twitterText))
+nchar(twitterText)
+twitterTextWordCount <- sum(sapply(strsplit(twitterText, " "), length))
+twitterTextWordCount
+```
+  
+The code above (for the twitter file) was repeated for the both the blogs and news files. In an effort to be as concise as possible, the code for those additional two files is not shown here.
+  
+  
+<br />
+Gathering the results from the code above, the data table below summarizes the relevant information:
+```{r echo=FALSE}
+FileName <- c("twitter", "blogs", "news") 
+LineCount <- c("2,360,148", "899,288", "1,010,242") 
+MaxLineLength <- c("140", "40,833", "11,384") 
+WordCount <- c("30,373,543", "37,334,131", "34,372,530")
+df = data.frame(FileName, LineCount, MaxLineLength, WordCount)       # df is a data frame 
+df
+```
+
+### **Section 3: Graphical analysis of the data files**  
+The exploratory data analysis continues with some graphical representations of the data. Prior to further analysis, **a sample of approximately 10% of each file** will be taken and saved into a new "sampleText" file.
+
+```{r eval=FALSE}
+sampleTwitterText <- twitterText[sample(1:length(twitterText),236000)]
+sampleBlogsText <- blogsText[sample(1:length(blogsText),90000)]
+sampleNewsText <- newsText[sample(1:length(newsText),101000)]
+sampleText <- c(sampleTwitterText,sampleBlogsText,sampleNewsText)
+writeLines(sampleText, "./sample/sampleText.txt")
+```
+
+```{r echo=FALSE}
+profanities <- c("fuck","shit","hell","piss","damn")
+```
+
+After sampling, it is necessary to clean the data before processing it further. "Stop words" (such as: the, is, at) will be removed, along with punctuation characters, numbers, whitespace, and profanity. The text will also be converted to lower case.
+
+```{r message=FALSE}
+library(tm)
+cname <- file.path(".", "sample")
+sampleCorpus <- Corpus(DirSource(cname))
+sampleCorpus <- tm_map(sampleCorpus, removeWords, stopwords("english"))
+sampleCorpus <- tm_map(sampleCorpus, stripWhitespace)
+sampleCorpus <- tm_map(sampleCorpus, content_transformer(tolower))
+sampleCorpus <- tm_map(sampleCorpus, removePunctuation)
+sampleCorpus <- tm_map(sampleCorpus, removeNumbers)
+sampleCorpus <- tm_map(sampleCorpus, removeWords, profanities)
+```
+
+
+Since our ultimate goal is predict the next work given some previous words, we must look at the frequency of specific sets of words in our data. These sets of words are known as n-grams.
+
+From Wikipedia: "In the fields of computational linguistics and probability, an n-gram is a contiguous sequence of n items from a given sequence of text or speech. An n-gram of size 1 is referred to as a "unigram"; size 2 is a "bigram" (or, less commonly, a "digram"); size 3 is a "trigram". Larger sizes are sometimes referred to by the value of n, e.g., "four-gram", "five-gram", and so on".
+
+Leveraging the NGramTokenizer in the RWeka package, a term document matrix will be created for NGrams from 1 to 3 words.  
+*TECHNICAL NOTE: it was necessary for me to **increase the Java memory allocation to 12GB** to avoid receiving Java out-of-memory errors.*
+
+```{r}
+options(java.parameters = "-Xmx12g")
+library(RWeka)
+
+# Create Unigrams
+tokenNgram1 <- function(x) NGramTokenizer(x, Weka_control(min = 1, max = 1))
+tdmSampleCorpusN1 <- TermDocumentMatrix(sampleCorpus, control = list(tokenize = tokenNgram1))
+unigrams <- rowSums(as.matrix(tdmSampleCorpusN1))
+
+# Create Bigrams
+tokenNgram2 <- function(x) NGramTokenizer(x, Weka_control(min = 2, max = 2))
+tdmSampleCorpusN2 <- TermDocumentMatrix(sampleCorpus, control = list(tokenize = tokenNgram2))
+bigrams <- rowSums(as.matrix(tdmSampleCorpusN2))
+
+# Create Trigrams
+tokenNgram3 <- function(x) NGramTokenizer(x, Weka_control(min = 3, max = 3))
+tdmSampleCorpusN3 <- TermDocumentMatrix(sampleCorpus, control = list(tokenize = tokenNgram3))
+trigrams <- rowSums(as.matrix(tdmSampleCorpusN3))
+```
+  
+  
+<br />
+The summary bar charts for the top 13 results for Unigrams, Bigrams, and Trigrams are shown below.
+
+```{r, echo=FALSE}
+par(mar=c(5,8,4,2))
+barplot(tail(sort(unigrams), 13), las = 2, main = "Most Frequent 13 Unigrams", cex.main = 1, cex.axis = 0.75, horiz=TRUE)
+
+bigrams <- rowSums(as.matrix(tdmSampleCorpusN2))
+par(mar=c(5,8,4,2))
+barplot(tail(sort(bigrams), 13), las = 2, main = "Most Frequent 13 Bigrams", cex.main = 1, cex.axis = 0.75, horiz=TRUE)
+
+trigrams <- rowSums(as.matrix(tdmSampleCorpusN3))
+par(mar=c(5,8,4,2))
+barplot(tail(sort(trigrams), 13), las = 2, main = "Most Frequent 13 Trigrams", cex.main = 1, cex.axis = 0.75, horiz=TRUE)
+```
+
+
+### **Section 4: Next steps and goals**  
+
+The next step in this process will be to construct a model that predicts the next word, given a set of previously entered words. More evaluation into additional data cleansing, sampling rates, and n-gram analysis will help inform the path toward building the algorithms to utilize when building the predictive model.
+
+The final output of the project will be a web-based application (a Shiny application) that will allow users to enter text and view the prediction results for the next word.
+
+Stuart Ward
